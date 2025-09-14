@@ -101,3 +101,115 @@
     endorser-type: (string-ascii 32),
   }
 )
+
+;; Manages delegation of authority within institutions
+(define-map institution-delegates
+  {
+    institution: principal,
+    delegate: principal,
+  }
+  {
+    active: bool,
+    permissions: (list 10 (string-ascii 32)),
+    added-at: uint,
+    expiry: uint,
+  }
+)
+
+;; Tracks credential transfer requests between users
+(define-map transfer-requests
+  uint
+  {
+    credential-id: (string-ascii 64),
+    old-owner: principal,
+    new-owner: principal,
+    status: (string-ascii 16),
+    request-time: uint,
+    expiry-time: uint,
+    transfer-type: (string-ascii 32),
+  }
+)
+
+;; INPUT VALIDATION FUNCTIONS
+
+(define-private (validate-non-empty-string (input (string-ascii 64)))
+  (> (len input) u0)
+)
+
+(define-private (validate-url (url (string-ascii 256)))
+  ;; Basic URL validation - ensure it's not empty
+  (> (len url) u0)
+)
+
+(define-private (validate-year (year uint))
+  ;; Ensure year is within reasonable range
+  (and
+    (> year u1900)
+    (< year (+ u2100 u1))
+  )
+)
+
+(define-private (validate-expiry (expiry uint))
+  (> expiry stacks-block-height)
+)
+
+(define-private (validate-credential-id (credential-id (string-ascii 64)))
+  ;; Ensure credential ID is not empty
+  (> (len credential-id) u0)
+)
+
+(define-private (validate-permissions (permissions (list 10 (string-ascii 32))))
+  ;; Ensure the permissions list is not empty
+  (> (len permissions) u0)
+)
+
+(define-private (validate-endorsement-weight (weight uint))
+  ;; Ensure weight is within acceptable range (1-100)
+  (and
+    (>= weight u1)
+    (<= weight u100)
+  )
+)
+
+(define-private (validate-principal (address principal))
+  (not (is-eq address tx-sender))
+  ;; Can't delegate to yourself
+)
+
+(define-private (validate-student (student-address principal))
+  (not (is-eq student-address tx-sender))
+  ;; Institution can't issue to itself
+)
+
+(define-private (validate-comment (comment-text (string-ascii 256)))
+  ;; Limit comment length to reasonable size
+  (<= (len comment-text) u200)
+)
+
+;; INSTITUTION MANAGEMENT FUNCTIONS
+
+;; Registers a new educational institution with stake requirement
+(define-public (register-institution (name (string-ascii 64)))
+  (let ((caller tx-sender))
+    (asserts!
+      (not (default-to false (get active (map-get? institutions caller))))
+      ERR-ALREADY-REGISTERED
+    )
+    (asserts! (validate-non-empty-string name) ERR-EMPTY-STRING)
+    (try! (stx-transfer? MINIMUM-STAKE caller (as-contract tx-sender)))
+
+    (map-set institutions caller {
+      name: name,
+      stake-amount: MINIMUM-STAKE,
+      credentials-issued: u0,
+      reputation-score: u100,
+      active: true,
+      suspension-status: false,
+      registration-date: stacks-block-height,
+      last-update: stacks-block-height,
+    })
+
+    (var-set total-institutions (+ (var-get total-institutions) u1))
+    (ok true)
+  )
+)
